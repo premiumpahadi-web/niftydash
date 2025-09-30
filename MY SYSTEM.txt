@@ -1,0 +1,155 @@
+# file name: nifty_dashboard.py
+
+import streamlit as st
+import yfinance as yf
+from newsapi import NewsApiClient
+from textblob import TextBlob
+import pandas as pd
+import matplotlib.pyplot as plt
+
+st.set_page_config(page_title="Nifty50 Mini Dashboard", layout="wide")
+st.title("📊 Nifty50 Mini Stock Analysis Dashboard")
+
+# -----------------------
+# Inputs
+# -----------------------
+api_key = st.text_input("Enter your NewsAPI Key", "")
+
+# Nifty50 top 10 sample stocks
+nifty_stocks = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
+                "KOTAKBANK.NS", "LT.NS", "HCLTECH.NS", "ITC.NS", "SBIN.NS"]
+
+if st.button("Analyze Nifty50 Top 10 Stocks") and api_key:
+
+    results = []
+
+    for stock in nifty_stocks:
+        st.write(f"Analyzing **{stock}** ...")
+        # -----------------------
+        # Stock Data
+        # -----------------------
+        try:
+            data = yf.Ticker(stock)
+            hist = data.history(period="6mo")
+            if hist.empty:
+                st.warning(f"No data for {stock}")
+                continue
+            last_close = hist['Close'][-1]
+        except:
+            st.warning(f"Error fetching data for {stock}")
+            continue
+
+        # -----------------------
+        # News Sentiment
+        # -----------------------
+        sentiments = []
+        try:
+            newsapi = NewsApiClient(api_key=api_key)
+            articles = newsapi.get_everything(
+                q=stock.split(".")[0],
+                language='en',
+                sort_by='relevancy',
+                page_size=50
+            )
+            for article in articles.get('articles', [])[:50]:
+                headline = article.get('title', "")
+                if headline:
+                    score = TextBlob(headline).sentiment.polarity
+                    sentiments.append(score)
+            avg_sentiment = sum(sentiments)/len(sentiments) if sentiments else 0
+        except:
+            avg_sentiment = 0
+
+        # -----------------------
+        # Indicators
+        # -----------------------
+        hist['SMA20'] = hist['Close'].rolling(20).mean()
+        hist['SMA50'] = hist['Close'].rolling(50).mean()
+        delta = hist['Close'].diff()
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+        avg_gain = gain.rolling(14).mean()
+        avg_loss = loss.rolling(14).mean()
+        rs = avg_gain / avg_loss
+        hist['RSI'] = 100 - (100 / (1 + rs))
+        ema12 = hist['Close'].ewm(span=12, adjust=False).mean()
+        ema26 = hist['Close'].ewm(span=26, adjust=False).mean()
+        hist['MACD'] = ema12 - ema26
+        hist['Signal'] = hist['MACD'].ewm(span=9, adjust=False).mean()
+
+        latest_sma20 = hist['SMA20'].iloc[-1]
+        latest_sma50 = hist['SMA50'].iloc[-1]
+        latest_rsi = hist['RSI'].iloc[-1]
+        latest_macd = hist['MACD'].iloc[-1]
+        latest_signal = hist['Signal'].iloc[-1]
+
+        # -----------------------
+        # Decision
+        # -----------------------
+        decision = "Hold"
+        if avg_sentiment > 0.1 and latest_sma20 > latest_sma50 and latest_rsi < 70 and latest_macd > latest_signal:
+            decision = "Buy"
+        elif avg_sentiment < -0.1 or latest_rsi > 70 or latest_macd < latest_signal:
+            decision = "Sell"
+
+        results.append({
+            "Stock": stock,
+            "Last Close": last_close,
+            "Avg Sentiment": round(avg_sentiment, 2),
+            "SMA20": round(latest_sma20, 2),
+            "SMA50": round(latest_sma50, 2),
+            "RSI": round(latest_rsi, 2),
+            "MACD": round(latest_macd, 2),
+            "Signal": round(latest_signal, 2),
+            "Decision": decision
+        })
+
+    df = pd.DataFrame(results)
+    st.subheader("📋 Analysis Summary")
+    st.dataframe(df)
+
+    # -----------------------
+    # Plot Graphs for first stock
+    # -----------------------
+    if df.shape[0] > 0:
+        stock = df['Stock'][0]
+        data = yf.Ticker(stock)
+        hist = data.history(period="6mo")
+        hist['SMA20'] = hist['Close'].rolling(20).mean()
+        hist['SMA50'] = hist['Close'].rolling(50).mean()
+        delta = hist['Close'].diff()
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+        avg_gain = gain.rolling(14).mean()
+        avg_loss = loss.rolling(14).mean()
+        rs = avg_gain / avg_loss
+        hist['RSI'] = 100 - (100 / (1 + rs))
+        ema12 = hist['Close'].ewm(span=12, adjust=False).mean()
+        ema26 = hist['Close'].ewm(span=26, adjust=False).mean()
+        hist['MACD'] = ema12 - ema26
+        hist['Signal'] = hist['MACD'].ewm(span=9, adjust=False).mean()
+
+        fig, axs = plt.subplots(4, 1, figsize=(10, 12))
+
+        # Price + SMA
+        axs[0].plot(hist.index, hist['Close'], label="Close Price", color='blue')
+        axs[0].plot(hist.index, hist['SMA20'], label="SMA20", color='green')
+        axs[0].plot(hist.index, hist['SMA50'], label="SMA50", color='red')
+        axs[0].legend()
+        axs[0].set_title(f"{stock} Price + SMA20/50")
+
+        # RSI
+        axs[1].plot(hist.index, hist['RSI'], label="RSI", color='purple')
+        axs[1].axhline(70, color='red', linestyle='--')
+        axs[1].axhline(30, color='green', linestyle='--')
+        axs[1].legend()
+        axs[1].set_title("RSI")
+
+        # MACD
+        axs[2].plot(hist.index, hist['MACD'], label="MACD", color='orange')
+        axs[2].plot(hist.index, hist['Signal'], label="Signal", color='black')
+        axs[2].legend()
+        axs[2].set_title("MACD")
+
+        st.subheader(f"📈 Charts for {stock}")
+        st.pyplot(fig)
