@@ -15,9 +15,9 @@ st.set_page_config(page_title="Nifty50 Mini Dashboard", layout="wide")
 st.title("📊 Nifty50 Mini Stock Analysis Dashboard")
 
 # -----------------------
-# API Key (Directly Added)
+# API Key (HIMANSHU547)
 # -----------------------
-api_key = "HIMANSHU547"
+
 
 # Nifty50 top 10 sample stocks
 nifty_stocks = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
